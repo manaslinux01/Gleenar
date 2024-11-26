@@ -8,12 +8,115 @@ import os
 import tempfile
 from flask_cors import CORS
 from utils import generate_frames
-
+import threading
+from deepface import DeepFace
 from flask_socketio import SocketIO, emit
 import time
 
 app = Flask(__name__)
 CORS(app)
+
+# Global variables to store video-related information
+current_video = None
+total_frames = 0
+current_frame_index = 0
+frame_delay = 0.1  # Delay between frames (in seconds)
+stop_streaming = False
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/upload_video', methods=['POST'])
+def upload_video():
+    global current_video, total_frames, current_frame_index, stop_streaming
+    
+    # Check if a file was uploaded
+    if 'video' not in request.files:
+        return 'No video file uploaded', 400
+    
+    video_file = request.files['video']
+    
+    # Create a temporary file
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
+    video_file.save(temp_file.name)
+    
+    # Open the video with OpenCV
+    current_video = cv2.VideoCapture(temp_file.name)
+    
+    # Get total number of frames
+    total_frames = int(current_video.get(cv2.CAP_PROP_FRAME_COUNT))
+    current_frame_index = 0
+    stop_streaming = False
+    
+    return jsonify({
+        'message': 'Video uploaded successfully',
+        'total_frames': total_frames
+    }), 200
+
+def detect_emotion(frame):
+    """Detects emotions using DeepFace."""
+    # Convert frame from BGR to RGB
+    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    
+    # Use DeepFace to analyze emotions
+    try:
+        analysis = DeepFace.analyze(rgb_frame, actions=['emotion'], enforce_detection=False)
+        dominant_emotion = analysis[0]['dominant_emotion']
+        
+        # Draw the emotion on the frame
+        cv2.putText(frame, dominant_emotion, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+    except Exception as e:
+        print("Error in emotion detection:", e)
+    
+    return frame
+
+def generate_frames():
+    global current_video, current_frame_index, total_frames, stop_streaming
+    
+    while not stop_streaming:
+        if current_video is None:
+            time.sleep(0.1)
+            continue
+        
+        # Set video to specific frame
+        current_video.set(cv2.CAP_PROP_POS_FRAMES, current_frame_index)
+        
+        # Read the frame
+        success, frame = current_video.read()
+        
+        if success:
+            # Detect emotion on the frame
+            frame = detect_emotion(frame)
+            
+            # Encode the frame in JPEG format
+            ret, buffer = cv2.imencode('.jpg', frame)
+            frame_bytes = buffer.tobytes()
+            
+            # Yield the frame
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+            
+            # Increment frame index (loop back to start if at end)
+            current_frame_index = (current_frame_index + 1) % total_frames
+            
+            time.sleep(frame_delay)
+        else:
+            # Reset to beginning if no more frames
+            current_frame_index = 0
+            time.sleep(0.1)
+
+@app.route('/video_stream')
+def video_stream():
+    return Response(generate_frames(), 
+                    mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/stop_stream', methods=['POST'])
+def stop_stream():
+    global stop_streaming
+    stop_streaming = True
+    return jsonify({'message': 'Streaming stopped'}), 200
+
 
 
 
@@ -177,7 +280,7 @@ def handle_connect():
     
     
     
-@app.route('/') 
+@app.route('/signal') 
 def signal():
     return render_template('signal.html')
 

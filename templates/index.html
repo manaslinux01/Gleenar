@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Emotion Detection</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            text-align: center;
+        }
+        #videoUpload {
+            margin: 20px 0;
+        }
+        #videoFrame {
+            max-width: 100%;
+            border: 1px solid #ddd;
+            margin-bottom: 20px;
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>Emotion Detection</h1>
+    
+    <form id="uploadForm" enctype="multipart/form-data">
+        <input type="file" id="videoUpload" name="video" accept="video/*">
+        <button type="submit">Upload and Stream Video</button>
+    </form>
+
+    <div id="streamContainer" class="hidden">
+        <div id="frameInfo">
+            <p id="totalFramesText"></p>
+        </div>
+
+        <img id="videoFrame" src="" alt="Video Frames will appear here">
+
+        <button id="stopStreamBtn">Stop Streaming</button>
+    </div>
+
+    <script>
+        const uploadForm = document.getElementById('uploadForm');
+        const streamContainer = document.getElementById('streamContainer');
+        const videoFrame = document.getElementById('videoFrame');
+        const totalFramesText = document.getElementById('totalFramesText');
+        const stopStreamBtn = document.getElementById('stopStreamBtn');
+
+        uploadForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            // Create FormData object
+            let formData = new FormData(this);
+            
+            // Upload video
+            fetch('/upload_video', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.total_frames) {
+                    // Show stream container
+                    streamContainer.classList.remove('hidden');
+                    
+                    // Set total frames text
+                    totalFramesText.textContent = `Total Frames: ${data.total_frames}`;
+                    
+                    // Start video stream
+                    videoFrame.src = '/video_stream';
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error uploading video');
+            });
+        });
+
+        stopStreamBtn.addEventListener('click', function() {
+            // Stop the video stream
+            videoFrame.src = '';
+            
+            fetch('/stop_stream', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Hide stream container
+                streamContainer.classList.add('hidden');
+                
+                // Reset upload form
+                uploadForm.reset();
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error stopping stream');
+            });
+        });
+    </script>
+</body>
+</html>
