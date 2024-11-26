@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-Time RGB Signal Extraction</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.24.2/plotly.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        .video-container {
+            grid-column: 1;
+        }
+        .plots-container {
+            grid-column: 2;
+        }
+        .upload-container {
+            margin-bottom: 20px;
+        }
+        .heart-rate {
+            font-size: 24px;
+            margin: 20px 0;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+        }
+        #videoFeed {
+            max-width: 100%;
+            border: 1px solid #ccc;
+        }
+        .plot {
+            margin-bottom: 20px;
+            border: 1px solid #ccc;
+            padding: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Real-Time RGB Signal Extraction with DMRS</h1>
+    
+    <div class="upload-container">
+        <input type="file" id="videoUpload" accept="video/*">
+        <button onclick="uploadVideo()">Upload and Process</button>
+    </div>
+
+    <div class="container">
+        <div class="video-container">
+            <img id="videoFeed" src="" alt="">
+        </div>
+        
+        <div class="plots-container">
+            <!-- <div class="heart-rate">Heart Rate: <span id="heartRate">--</span> BPM</div> -->
+            <div class="plot">Color plot<span id="rawPlot">--</span></div>
+            <div  class="plot">normalizedPlot<span id="normalizedPlot">--</span></div>
+        </div>
+    </div>
+
+    <script>
+        function uploadVideo() {
+    const fileInput = document.getElementById('videoUpload');
+    const file = fileInput.files[0];
+    if (!file) {
+        alert('Please select a video file first');
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('video', file);
+
+    fetch('/upload', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            startVideoProcessing(data.filepath);
+        }
+    })
+    .catch(error => console.error('Error:', error));
+}
+
+let updateInterval = null;
+let previousDataLength = 0;
+let unchangedCount = 0;
+
+function startVideoProcessing(videoPath) {
+    // Start video feed
+    document.getElementById('videoFeed').src = `/video_feed/${videoPath}`;
+    
+    // Clear any existing interval
+    if (updateInterval) {
+        clearInterval(updateInterval);
+    }
+
+    // Reset counters
+    previousDataLength = 0;
+    unchangedCount = 0;
+
+    // Initialize plots
+    Plotly.newPlot('rawPlot', [{
+        y: [],
+        name: 'Red',
+        line: {color: 'red'}
+    }, {
+        y: [],
+        name: 'Green',
+        line: {color: 'green'}
+    }, {
+        y: [],
+        name: 'Blue',
+        line: {color: 'blue'}
+    }], {
+        title: 'Raw RGB Signals',
+        xaxis: {title: 'Time (seconds)'},
+        yaxis: {title: 'Value', range: [0, 255]}
+    });
+
+    Plotly.newPlot('normalizedPlot', [{
+        y: [],
+        name: 'Red',
+        line: {color: 'red'}
+    }, {
+        y: [],
+        name: 'Green',
+        line: {color: 'green'}
+    }, {
+        y: [],
+        name: 'Blue',
+        line: {color: 'blue'}
+    }], {
+        title: 'Normalized RGB Signals',
+        xaxis: {title: 'Time (seconds)'},
+        yaxis: {title: 'Value', range: [-3, 3]}
+    });
+
+    // Start updating signals
+    updateInterval = setInterval(updateSignals, 1000);
+}
+
+function stopVideoProcessing() {
+    if (updateInterval) {
+        clearInterval(updateInterval);
+        updateInterval = null;
+    }
+}
+
+function isProcessingComplete(currentDataLength) {
+    // If data length hasn't changed for 3 consecutive checks, consider processing complete
+    if (currentDataLength === previousDataLength) {
+        unchangedCount++;
+        if (unchangedCount >= 3) {
+            return true;
+        }
+    } else {
+        unchangedCount = 0;
+        previousDataLength = currentDataLength;
+    }
+    return false;
+}
+
+function updateSignals() {
+    fetch('/get_signals')
+        .then(response => response.json())
+        .then(data => {
+            // Check if we have data
+            const currentDataLength = data.raw.R.length;
+            
+            // Update plots if we have data
+            if (currentDataLength > 0) {
+                // Update raw signals plot
+                Plotly.update('rawPlot', {
+                    x: [data.time, data.time, data.time],
+                    y: [data.raw.R, data.raw.G, data.raw.B]
+                });
+
+                // Update normalized signals plot
+                Plotly.update('normalizedPlot', {
+                    x: [data.time, data.time, data.time],
+                    y: [data.normalized.R, data.normalized.G, data.normalized.B]
+                });
+
+                // Check if processing is complete
+                if (isProcessingComplete(currentDataLength)) {
+                    console.log('Video processing completed');
+                    stopVideoProcessing();
+                }
+            } else {
+                // No data received, likely processing is complete
+                console.log('No data received, stopping processing');
+                stopVideoProcessing();
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            stopVideoProcessing();
+        });
+}
+</script>
+</body>
+</html>
